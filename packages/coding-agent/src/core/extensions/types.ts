@@ -56,6 +56,7 @@ import type {
 	SessionEntry,
 	SessionManager,
 } from "../session-manager.ts";
+import type { Skill } from "../skills.ts";
 import type { SlashCommandInfo } from "../slash-commands.ts";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
@@ -1134,6 +1135,16 @@ export interface ExtensionAPI {
 		tool: ToolDefinition<TParams, TDetails, TState>,
 	): void;
 
+	/**
+	 * Register an exclusive builder for the base system prompt.
+	 *
+	 * When present, pi skips its native base system-prompt builder for
+	 * agent turns and instead invokes this builder with the live prompt
+	 * resources (tools, AGENTS files, skills, APPEND_SYSTEM, docs paths).
+	 * Only one extension may register a builder.
+	 */
+	registerSystemPromptBuilder(builder: SystemPromptBuilder): void;
+
 	// =========================================================================
 	// Command, Shortcut, Flag Registration
 	// =========================================================================
@@ -1422,12 +1433,35 @@ export type GetSessionNameHandler = () => string | undefined;
 
 export type GetActiveToolsHandler = () => string[];
 
-/** Tool info with name, description, parameter schema, and source metadata */
-export type ToolInfo = Pick<ToolDefinition, "name" | "description" | "parameters"> & {
+/** Tool info with prompt metadata and source metadata. */
+export type ToolInfo = Pick<
+	ToolDefinition,
+	"name" | "description" | "parameters" | "promptSnippet" | "promptGuidelines"
+> & {
 	sourceInfo: SourceInfo;
 };
 
 export type GetAllToolsHandler = () => ToolInfo[];
+
+export interface SystemPromptBuilderPiDocs {
+	readmePath: string;
+	docsPath: string;
+	examplesPath: string;
+}
+
+export interface SystemPromptBuilderContext {
+	prompt: string;
+	images: ImageContent[] | undefined;
+	cwd: string;
+	activeTools: string[];
+	allTools: ToolInfo[];
+	contextFiles: Array<{ path: string; content: string }>;
+	skills: Skill[];
+	appendSystemPrompt: string[];
+	piDocs: SystemPromptBuilderPiDocs;
+}
+
+export type SystemPromptBuilder = (context: SystemPromptBuilderContext) => Promise<string> | string;
 
 export type GetCommandsHandler = () => SlashCommandInfo[];
 
@@ -1449,6 +1483,8 @@ export type SetLabelHandler = (entryId: string, label: string | undefined) => vo
  */
 export interface ExtensionRuntimeState {
 	flagValues: Map<string, boolean | string>;
+	/** Extension path that owns the system-prompt builder, if any. */
+	systemPromptBuilderOwner?: string;
 	/** Provider registrations queued during extension loading, processed when runner binds */
 	pendingProviderRegistrations: Array<{ name: string; config: ProviderConfig; extensionPath: string }>;
 	/** Throws when this extension instance is stale after runtime replacement. */
@@ -1541,6 +1577,7 @@ export interface Extension {
 	sourceInfo: SourceInfo;
 	handlers: Map<string, HandlerFn[]>;
 	tools: Map<string, RegisteredTool>;
+	systemPromptBuilder?: SystemPromptBuilder;
 	messageRenderers: Map<string, MessageRenderer>;
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;

@@ -33,6 +33,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai";
+import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { sleep } from "../utils/sleep.ts";
@@ -765,6 +766,8 @@ export class AgentSession {
 			name: definition.name,
 			description: definition.description,
 			parameters: definition.parameters,
+			promptSnippet: definition.promptSnippet,
+			promptGuidelines: definition.promptGuidelines,
 			sourceInfo,
 		}));
 	}
@@ -872,6 +875,34 @@ export class AgentSession {
 			}
 		}
 		return Array.from(unique);
+	}
+
+	private async _buildOwnedSystemPrompt(
+		prompt: string,
+		images: ImageContent[] | undefined,
+	): Promise<string | undefined> {
+		const builder = this._extensionRunner?.getSystemPromptBuilder();
+		if (!builder) return undefined;
+
+		const loadedSkills = this._resourceLoader.getSkills().skills;
+		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		const appendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
+
+		return await builder.builder({
+			prompt,
+			images,
+			cwd: this._cwd,
+			activeTools: this.getActiveToolNames(),
+			allTools: this.getAllTools(),
+			contextFiles: loadedContextFiles,
+			skills: loadedSkills,
+			appendSystemPrompt,
+			piDocs: {
+				readmePath: getReadmePath(),
+				docsPath: getDocsPath(),
+				examplesPath: getExamplesPath(),
+			},
+		});
 	}
 
 	private _rebuildSystemPrompt(toolNames: string[]): string {
@@ -1070,32 +1101,41 @@ export class AgentSession {
 			}
 			this._pendingNextTurnMessages = [];
 
-			// Emit before_agent_start extension event
-			const result = await this._extensionRunner.emitBeforeAgentStart(
-				expandedText,
-				currentImages,
-				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
-			);
-			// Add all custom messages from extensions
-			if (result?.messages) {
-				for (const msg of result.messages) {
-					messages.push({
-						role: "custom",
-						customType: msg.customType,
-						content: msg.content,
-						display: msg.display,
-						details: msg.details,
-						timestamp: Date.now(),
-					});
+			let currentSystemPrompt = this._baseSystemPrompt;
+			if (this._extensionRunner) {
+				const ownedSystemPrompt = await this._buildOwnedSystemPrompt(expandedText, currentImages);
+				if (ownedSystemPrompt !== undefined) {
+					currentSystemPrompt = ownedSystemPrompt;
 				}
-			}
-			// Apply extension-modified system prompt, or reset to base
-			if (result?.systemPrompt) {
-				this.agent.state.systemPrompt = result.systemPrompt;
+
+				// Emit before_agent_start extension event
+				const result = await this._extensionRunner.emitBeforeAgentStart(
+					expandedText,
+					currentImages,
+					currentSystemPrompt,
+					this._baseSystemPromptOptions,
+				);
+				// Add all custom messages from extensions
+				if (result?.messages) {
+					for (const msg of result.messages) {
+						messages.push({
+							role: "custom",
+							customType: msg.customType,
+							content: msg.content,
+							display: msg.display,
+							details: msg.details,
+							timestamp: Date.now(),
+						});
+					}
+				}
+				// Apply extension-modified system prompt, or reset to the owned/base prompt
+				if (result?.systemPrompt) {
+					this.agent.state.systemPrompt = result.systemPrompt;
+				} else {
+					this.agent.state.systemPrompt = currentSystemPrompt;
+				}
 			} else {
-				// Ensure we're using the base prompt (in case previous turn had modifications)
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
+				this.agent.state.systemPrompt = currentSystemPrompt;
 			}
 		} catch (error) {
 			preflightResult?.(false);

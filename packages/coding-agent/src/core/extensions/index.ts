@@ -130,6 +130,8 @@ export type {
 	SetLabelHandler,
 	SetModelHandler,
 	SetThinkingLevelHandler,
+	SystemPromptBuilder,
+	SystemPromptBuilderContext,
 	TerminalInputHandler,
 	// Events - Tool
 	ToolCallEvent,

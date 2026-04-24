@@ -49,6 +49,7 @@ import type {
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
 	SessionShutdownEvent,
+	SystemPromptBuilder,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
@@ -558,6 +559,15 @@ export class ExtensionRunner {
 		return this.resolveRegisteredCommands().find((command) => command.invocationName === name);
 	}
 
+	getSystemPromptBuilder(): { extensionPath: string; builder: SystemPromptBuilder } | undefined {
+		for (const ext of this.extensions) {
+			if (ext.systemPromptBuilder) {
+				return { extensionPath: ext.path, builder: ext.systemPromptBuilder };
+			}
+		}
+		return undefined;
+	}
+
 	/**
 	 * Request a graceful shutdown. Called by extension tools and event handlers.
 	 * The actual shutdown behavior is provided by the mode via bindExtensions().
@@ -927,6 +937,7 @@ export class ExtensionRunner {
 		systemPrompt: string,
 		systemPromptOptions: BuildSystemPromptOptions,
 	): Promise<BeforeAgentStartCombinedResult | undefined> {
+		const promptOwner = this.getSystemPromptBuilder();
 		let currentSystemPrompt = systemPrompt;
 		const ctx = Object.defineProperties(
 			{},
@@ -960,8 +971,22 @@ export class ExtensionRunner {
 							messages.push(result.message);
 						}
 						if (result.systemPrompt !== undefined) {
-							currentSystemPrompt = result.systemPrompt;
-							systemPromptModified = true;
+							if (promptOwner && ext.path !== promptOwner.extensionPath) {
+								const nextPrompt = result.systemPrompt;
+								if (!nextPrompt.startsWith(currentSystemPrompt)) {
+									this.emitError({
+										extensionPath: ext.path,
+										event: "before_agent_start",
+										error: `Cannot replace system prompt owned by ${promptOwner.extensionPath}; append to event.systemPrompt instead.`,
+									});
+								} else {
+									currentSystemPrompt = nextPrompt;
+									systemPromptModified = true;
+								}
+							} else {
+								currentSystemPrompt = result.systemPrompt;
+								systemPromptModified = true;
+							}
 						}
 					}
 				} catch (err) {

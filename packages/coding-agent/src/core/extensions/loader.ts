@@ -174,6 +174,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		getThinkingLevel: notInitialized,
 		setThinkingLevel: notInitialized,
 		flagValues: new Map(),
+		systemPromptBuilderOwner: undefined,
 		pendingProviderRegistrations: [],
 		assertActive,
 		invalidate: (message) => {
@@ -230,6 +231,16 @@ function createExtensionAPI(
 				sourceInfo: extension.sourceInfo,
 				...options,
 			});
+		},
+
+		registerSystemPromptBuilder(builder): void {
+			if (runtime.systemPromptBuilderOwner && runtime.systemPromptBuilderOwner !== extension.path) {
+				throw new Error(
+					`System prompt builder already registered by ${runtime.systemPromptBuilderOwner}; only one extension may own the base system prompt.`,
+				);
+			}
+			extension.systemPromptBuilder = builder;
+			runtime.systemPromptBuilderOwner = extension.path;
 		},
 
 		registerShortcut(
@@ -383,6 +394,7 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 		sourceInfo: createSyntheticSourceInfo(extensionPath, { source, baseDir }),
 		handlers: new Map(),
 		tools: new Map(),
+		systemPromptBuilder: undefined,
 		messageRenderers: new Map(),
 		commands: new Map(),
 		flags: new Map(),
