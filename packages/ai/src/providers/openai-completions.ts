@@ -576,12 +576,14 @@ function buildParams(
 				model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
 		}
 	} else if (compat.thinkingFormat === "openrouter" && model.reasoning) {
-		// OpenRouter normalizes reasoning across providers via a nested reasoning object.
+		// OpenRouter expects OpenAI-style effort values in reasoning.effort.
 		const openRouterParams = params as typeof params & { reasoning?: { effort?: string } };
 		if (options?.reasoningEffort) {
-			openRouterParams.reasoning = {
-				effort: model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort,
-			};
+			let effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+			if (effort === "max") {
+				effort = "xhigh";
+			}
+			openRouterParams.reasoning = { effort };
 		} else if (model.thinkingLevelMap?.off !== null) {
 			openRouterParams.reasoning = { effort: model.thinkingLevelMap?.off ?? "none" };
 		}
@@ -1136,6 +1138,12 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 	const detected = detectCompat(model);
 	if (!model.compat) return detected;
 
+	const compatThinkingFormat = model.compat.thinkingFormat;
+	const thinkingFormat =
+		detected.thinkingFormat === "openrouter" && compatThinkingFormat === "deepseek"
+			? "openrouter"
+			: (compatThinkingFormat ?? detected.thinkingFormat);
+
 	return {
 		supportsStore: model.compat.supportsStore ?? detected.supportsStore,
 		supportsDeveloperRole: model.compat.supportsDeveloperRole ?? detected.supportsDeveloperRole,
@@ -1149,7 +1157,7 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		requiresReasoningContentOnAssistantMessages:
 			model.compat.requiresReasoningContentOnAssistantMessages ??
 			detected.requiresReasoningContentOnAssistantMessages,
-		thinkingFormat: model.compat.thinkingFormat ?? detected.thinkingFormat,
+		thinkingFormat,
 		openRouterRouting: model.compat.openRouterRouting ?? {},
 		vercelGatewayRouting: model.compat.vercelGatewayRouting ?? detected.vercelGatewayRouting,
 		zaiToolStream: model.compat.zaiToolStream ?? detected.zaiToolStream,

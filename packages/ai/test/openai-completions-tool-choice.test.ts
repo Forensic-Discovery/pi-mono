@@ -1148,4 +1148,72 @@ describe("openai-completions tool_choice", () => {
 		expect(params.reasoning).toEqual({ effort: "high" });
 		expect(params.reasoning_effort).toBeUndefined();
 	});
+
+	it("uses OpenRouter reasoning effort xhigh for DeepSeek V4 Pro instead of deepseek max", async () => {
+		const model = getModel("openrouter", "deepseek/deepseek-v4-pro")!;
+		let payload: unknown;
+
+		await streamSimple(
+			model,
+			{
+				messages: [
+					{
+						role: "user",
+						content: "Hi",
+						timestamp: Date.now(),
+					},
+				],
+			},
+			{
+				apiKey: "test",
+				reasoning: "xhigh",
+				onPayload: (params: unknown) => {
+					payload = params;
+				},
+			},
+		).result();
+
+		const params = (payload ?? mockState.lastParams) as {
+			reasoning?: { effort?: string };
+			reasoning_effort?: string;
+			thinking?: { type?: string };
+		};
+		expect(params.reasoning).toEqual({ effort: "xhigh" });
+		expect(params.reasoning_effort).toBeUndefined();
+		expect(params.thinking).toBeUndefined();
+	});
+
+	it("keeps native DeepSeek effort mapping for direct DeepSeek provider", async () => {
+		const model = getModel("deepseek", "deepseek-v4-pro")!;
+		let payload: unknown;
+
+		await streamSimple(
+			model,
+			{
+				messages: [
+					{
+						role: "user",
+						content: "Hi",
+						timestamp: Date.now(),
+					},
+				],
+			},
+			{
+				apiKey: "test",
+				reasoning: "xhigh",
+				onPayload: (params: unknown) => {
+					payload = params;
+				},
+			},
+		).result();
+
+		const params = (payload ?? mockState.lastParams) as {
+			reasoning?: { effort?: string };
+			reasoning_effort?: string;
+			thinking?: { type?: string };
+		};
+		expect(params.thinking).toEqual({ type: "enabled" });
+		expect(params.reasoning_effort).toBe("max");
+		expect(params.reasoning).toBeUndefined();
+	});
 });
